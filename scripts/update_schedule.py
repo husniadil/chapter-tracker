@@ -60,8 +60,9 @@ RECENT_WINDOW_DAYS = 180
 
 # Selector override so the failure path can be exercised on demand. Setting it
 # to a field number that is not in the response makes parsing fail the way a
-# structure change would.
-CHAPTER_GROUP_FIELD = int(os.environ.get("MANGAPLUS_CHAPTER_GROUP_FIELD", F_CHAPTER_GROUP))
+# structure change would. Scheduled runs pass this through empty.
+_override = os.environ.get("MANGAPLUS_CHAPTER_GROUP_FIELD", "").strip()
+CHAPTER_GROUP_FIELD = int(_override) if _override else F_CHAPTER_GROUP
 
 
 class ParseError(Exception):
