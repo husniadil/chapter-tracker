@@ -289,6 +289,11 @@ function tick() {
 }
 
 function renderManga(schedule) {
+  // A reload can clear a flag that an earlier render raised, so start from hidden.
+  el("stale").hidden = true;
+  el("break").hidden = true;
+  el("manga-note").hidden = true;
+
   if (schedule.stale) {
     el("stale-detail").textContent =
       "Pembaruan terakhir berhasil " + wib(Date.parse(schedule.updated_at_utc)) +
@@ -339,6 +344,7 @@ function renderManga(schedule) {
 
 function renderAnime(nodes) {
   var list = el("anime-list");
+  list.textContent = "";
   nodes.forEach(function (node) {
     var li = document.createElement("li");
     var name = document.createElement("b");
@@ -373,6 +379,7 @@ function loadAnime() {
     })
     .catch(function (error) {
       el("anime-status").textContent = "Jadwal anime gagal dimuat (" + error.message + ").";
+      el("anime-status").hidden = false;
     });
 }
 
@@ -389,8 +396,24 @@ function loadManga() {
     });
 }
 
-loadManga();
-loadAnime();
+var lastLoad = 0;
+var REFRESH_AFTER_MS = 15 * 60 * 1000;
+
+function load() {
+  lastLoad = Date.now();
+  loadManga();
+  loadAnime();
+}
+
+// Pinned tabs sit in the background for days, where timers get throttled and
+// the schedule goes out of date. Catch up the moment the tab is looked at.
+document.addEventListener("visibilitychange", function () {
+  if (document.hidden) return;
+  tick();
+  if (Date.now() - lastLoad > REFRESH_AFTER_MS) load();
+});
+
+load();
 setInterval(tick, 1000);
 </script>
 </body>
