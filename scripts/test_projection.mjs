@@ -141,6 +141,81 @@ test("weeklyRunLength ignores duplicates and unparseable entries", () => {
   assert.equal(weeklyRunLength([]), 0);
 });
 
+test("weekly projection crosses into the next year", () => {
+  const result = resolveNextRelease({
+    latest_chapter: 1230,
+    latest_release_utc: "2026-12-27T15:00:00Z",
+    next_chapter: 1231,
+    next_release_utc: null,
+    next_confirmed: false,
+    recent_releases_utc: ["2026-12-20T15:00:00Z", "2026-12-27T15:00:00Z"]
+  });
+  assert.equal(isoOf(result.at), "2027-01-03T15:00:00Z");
+  assert.equal(result.source, "projected-weekly");
+});
+
+test("break projection crosses into the next year", () => {
+  const result = resolveNextRelease({
+    latest_chapter: 1230,
+    latest_release_utc: "2026-12-27T15:00:00Z",
+    next_chapter: 1231,
+    next_release_utc: null,
+    next_confirmed: false,
+    recent_releases_utc: [
+      "2026-12-13T15:00:00Z",
+      "2026-12-20T15:00:00Z",
+      "2026-12-27T15:00:00Z"
+    ]
+  });
+  assert.equal(isoOf(result.at), "2027-01-10T15:00:00Z");
+  assert.equal(result.source, "projected-break");
+  assert.equal(result.gapDays, 14);
+});
+
+test("a confirmed date in the next year is used verbatim", () => {
+  const result = resolveNextRelease({
+    latest_chapter: 1230,
+    latest_release_utc: "2026-12-20T15:00:00Z",
+    next_chapter: 1231,
+    next_release_utc: "2027-01-17T15:00:00Z",
+    next_confirmed: true,
+    recent_releases_utc: ["2026-12-13T15:00:00Z", "2026-12-20T15:00:00Z"]
+  });
+  assert.equal(isoOf(result.at), "2027-01-17T15:00:00Z");
+  assert.equal(result.confirmed, true);
+  assert.equal(result.gapDays, 28);
+});
+
+test("projection spans February in a leap year", () => {
+  // 2028-02-20 plus 14 days lands on 2028-03-05 only if the 29th exists.
+  const result = resolveNextRelease({
+    latest_release_utc: "2028-02-20T15:00:00Z",
+    next_confirmed: false,
+    next_release_utc: null,
+    recent_releases_utc: [
+      "2028-02-06T15:00:00Z",
+      "2028-02-13T15:00:00Z",
+      "2028-02-20T15:00:00Z"
+    ]
+  });
+  assert.equal(isoOf(result.at), "2028-03-05T15:00:00Z");
+  assert.equal(result.source, "projected-break");
+});
+
+test("gaps are measured in real elapsed time, not calendar arithmetic", () => {
+  // Every one of these is exactly seven days apart across a year boundary.
+  assert.equal(weeklyRunLength([
+    at("2026-12-20T15:00:00Z"),
+    at("2026-12-27T15:00:00Z"),
+    at("2027-01-03T15:00:00Z")
+  ]), 3);
+  // A month boundary is not a gap: Jan 31 to Feb 7 is still one week.
+  assert.equal(weeklyRunLength([
+    at("2027-01-31T15:00:00Z"),
+    at("2027-02-07T15:00:00Z")
+  ]), 2);
+});
+
 test("the live schedule.json parses and resolves", () => {
   const live = JSON.parse(readFileSync(join(root, "docs", "schedule.json"), "utf8"));
   const result = resolveNextRelease(live);

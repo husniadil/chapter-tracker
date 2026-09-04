@@ -381,12 +381,13 @@ var fullWib = new Intl.DateTimeFormat("id-ID", {
   timeZone: WIB, weekday: "long", day: "numeric", month: "long",
   year: "numeric", hour: "2-digit", minute: "2-digit"
 });
-var dayWib = new Intl.DateTimeFormat("id-ID", {
-  timeZone: WIB, weekday: "long", day: "numeric", month: "long"
-});
 var shortDayWib = new Intl.DateTimeFormat("id-ID", {
   timeZone: WIB, weekday: "short", day: "numeric", month: "short"
 });
+var shortDayYearWib = new Intl.DateTimeFormat("id-ID", {
+  timeZone: WIB, weekday: "short", day: "numeric", month: "short", year: "numeric"
+});
+var yearWib = new Intl.DateTimeFormat("id-ID", { timeZone: WIB, year: "numeric" });
 var clockWib = new Intl.DateTimeFormat("id-ID", {
   timeZone: WIB, hour: "2-digit", minute: "2-digit"
 });
@@ -417,7 +418,15 @@ var COPY = {
 function el(id) { return document.getElementById(id); }
 function pad(n) { return n < 10 ? "0" + n : String(n); }
 function stamp(ms) { return fullWib.format(new Date(ms)) + " WIB"; }
-function day(ms) { return dayWib.format(new Date(ms)); }
+
+/* Short dates carry no year, which is only safe while the date is in the year
+   the reader is living in. An episode four weeks out in December is not. */
+function sameYearAsNow(ms) {
+  return yearWib.format(new Date(ms)) === yearWib.format(new Date());
+}
+function shortDay(ms) {
+  return (sameYearAsNow(ms) ? shortDayWib : shortDayYearWib).format(new Date(ms));
+}
 
 var target = null;
 var released = false;
@@ -429,7 +438,9 @@ function tick() {
     released = true;
     render.released();
   }
-  var s = Math.max(0, Math.floor(left / 1000));
+  // Ceil, not floor: with floor the display hits zero while `left` is still
+  // positive, so the page sat on 00:00:00:00 until the next tick released it.
+  var s = Math.max(0, Math.ceil(left / 1000));
   el("cd-d").textContent = pad(Math.floor(s / 86400));
   el("cd-h").textContent = pad(Math.floor(s / 3600) % 24);
   el("cd-m").textContent = pad(Math.floor(s / 60) % 60);
@@ -535,11 +546,11 @@ function renderEpisodes(nodes) {
 
     var num = document.createElement("span");
     num.className = "num";
-    num.textContent = node.episode;
+    num.textContent = "Episode " + node.episode;
 
     var date = document.createElement("span");
     date.className = "date";
-    date.textContent = shortDayWib.format(new Date(node.airingAt * 1000));
+    date.textContent = shortDay(node.airingAt * 1000);
 
     var time = document.createElement("span");
     time.className = "time";
@@ -611,11 +622,20 @@ function load() {
 
 // Pinned tabs sit in the background for days, where timers get throttled and
 // the schedule goes out of date. Catch up the moment the tab is looked at.
+function refreshIfStale() {
+  if (document.hidden) return;
+  if (Date.now() - lastLoad > REFRESH_AFTER_MS) load();
+}
+
 document.addEventListener("visibilitychange", function () {
   if (document.hidden) return;
   tick();
-  if (Date.now() - lastLoad > REFRESH_AFTER_MS) load();
+  refreshIfStale();
 });
+
+// A tab left open and focused never fires visibilitychange, so on its own the
+// schedule above would keep ageing. This is the only path that catches that.
+setInterval(refreshIfStale, 60 * 1000);
 
 load();
 setInterval(tick, 1000);
