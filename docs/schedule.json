@@ -11,8 +11,6 @@
     "2026-08-23T15:00:00Z"
   ],
   "source_url": "https://mangaplus.shueisha.co.jp/titles/100020",
-  "stale": true,
-  "updated_at_utc": "2026-09-04T02:34:59Z",
-  "stale_reason": "no released chapters found in 0 parsed entries; the chapter list structure has probably changed",
-  "stale_since_utc": "2026-09-04T02:40:41Z"
+  "stale": false,
+  "updated_at_utc": "2026-09-04T02:41:54Z"
 }
