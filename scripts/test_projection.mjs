@@ -21,11 +21,15 @@ const block = page.match(/\/\* === projection:begin ===[\s\S]*?\/\* === projecti
 assert.ok(block, "projection block not found in docs/index.html");
 
 const context = vm.createContext({});
-vm.runInContext(block[0] + "\n;({ projectNextRelease, resolveNextRelease, weeklyRunLength })", context);
-const { projectNextRelease, resolveNextRelease, weeklyRunLength } = vm.runInContext(
-  "({ projectNextRelease, resolveNextRelease, weeklyRunLength })",
-  context
-);
+const EXPORTS = "({ projectNextRelease, resolveNextRelease, runLength, releaseCadence, sortedReleases })";
+vm.runInContext(block[0] + "\n;" + EXPORTS, context);
+const { projectNextRelease, resolveNextRelease, runLength, releaseCadence, sortedReleases } =
+  vm.runInContext(EXPORTS, context);
+
+const DAY = 24 * 60 * 60 * 1000;
+const cadenceOf = (...iso) => releaseCadence(sortedReleases(iso.map(Date.parse))) / DAY;
+const runOf = (cadenceDays, ...iso) =>
+  runLength(sortedReleases(iso.map(Date.parse)), cadenceDays * DAY);
 
 /* MANGA Plus releases One Piece at 15:00 UTC on Sundays. */
 const SUN_MAY_03 = "2026-05-03T15:00:00Z";
@@ -60,7 +64,7 @@ test("normal week: two weeks running projects the next Sunday", () => {
     recent_releases_utc: [SUN_MAY_03, SUN_MAY_10]
   });
   assert.equal(isoOf(result.at), SUN_MAY_17);
-  assert.equal(result.source, "projected-weekly");
+  assert.equal(result.source, "projected-cadence");
   assert.equal(result.confirmed, false);
   assert.equal(result.breakWeek, false);
 });
@@ -92,7 +96,7 @@ test("magazine break: a break already served resets the run to weekly", () => {
     recent_releases_utc: [SUN_APR_26, SUN_MAY_10, SUN_MAY_17]
   });
   assert.equal(isoOf(result.at), SUN_MAY_24);
-  assert.equal(result.source, "projected-weekly");
+  assert.equal(result.source, "projected-cadence");
   assert.equal(result.breakWeek, false);
 });
 
@@ -122,7 +126,7 @@ test("no history at all falls back to weekly", () => {
     next_release_utc: null
   });
   assert.equal(isoOf(result.at), SUN_MAY_17);
-  assert.equal(result.source, "projected-weekly");
+  assert.equal(result.source, "projected-cadence");
 });
 
 test("next_confirmed without a usable date falls back to the projection", () => {
@@ -136,9 +140,63 @@ test("next_confirmed without a usable date falls back to the projection", () => 
   assert.equal(result.confirmed, false);
 });
 
-test("weeklyRunLength ignores duplicates and unparseable entries", () => {
-  assert.equal(weeklyRunLength([at(SUN_MAY_03), at(SUN_MAY_03), at(SUN_MAY_10), NaN]), 2);
-  assert.equal(weeklyRunLength([]), 0);
+test("runLength ignores duplicates and unparseable entries", () => {
+  assert.equal(runOf(7, SUN_MAY_03, SUN_MAY_03, SUN_MAY_10), 2);
+  assert.equal(runLength([], 7 * DAY), 0);
+});
+
+test("cadence is the shortest recent gap, because breaks only lengthen gaps", () => {
+  assert.equal(cadenceOf(SUN_MAY_03, SUN_MAY_10, SUN_MAY_17), 7);
+  assert.equal(cadenceOf(SUN_APR_26, SUN_MAY_10, SUN_MAY_17), 7, "a served break must not raise the cadence");
+  assert.equal(cadenceOf("2026-07-12T15:00:00Z", "2026-07-26T15:00:00Z", "2026-08-09T15:00:00Z"), 14);
+  assert.equal(cadenceOf(SUN_MAY_10), 7, "one release alone falls back to a week");
+});
+
+test("a fortnightly run projects a fortnight, not a week", () => {
+  // This is the shape the live schedule.json has had all season. Projecting a
+  // week here lands on a date already in the past.
+  const result = resolveNextRelease({
+    latest_chapter: 1191,
+    latest_release_utc: "2026-08-23T15:00:00Z",
+    next_chapter: 1192,
+    next_release_utc: null,
+    next_confirmed: false,
+    recent_releases_utc: [
+      "2026-07-12T15:00:00Z",
+      "2026-07-26T15:00:00Z",
+      "2026-08-09T15:00:00Z",
+      "2026-08-23T15:00:00Z"
+    ]
+  });
+  assert.equal(isoOf(result.at), "2026-09-06T15:00:00Z");
+  assert.equal(result.source, "projected-cadence");
+  assert.equal(result.breakWeek, true, "a fortnight gap is still more than a week without a chapter");
+});
+
+test("the break rule stays off a fortnightly run", () => {
+  // Three fortnights in a row is the cadence, not three weeks earning a break.
+  const result = resolveNextRelease({
+    latest_release_utc: "2026-08-23T15:00:00Z",
+    next_confirmed: false,
+    next_release_utc: null,
+    recent_releases_utc: [
+      "2026-07-12T15:00:00Z",
+      "2026-07-26T15:00:00Z",
+      "2026-08-09T15:00:00Z",
+      "2026-08-23T15:00:00Z"
+    ]
+  });
+  assert.notEqual(result.source, "projected-break");
+  assert.equal(result.gapDays, 14, "a 28-day projection would mean the break rule fired");
+});
+
+test("the projection agrees with the date MANGA Plus announced", () => {
+  // The strongest check available: hide the announced date, project it back,
+  // and require the guess to land on it.
+  const live = JSON.parse(readFileSync(join(root, "docs", "schedule.json"), "utf8"));
+  if (!live.next_confirmed || !live.next_release_utc) return;
+  const blind = resolveNextRelease({ ...live, next_confirmed: false, next_release_utc: null });
+  assert.equal(isoOf(blind.at), live.next_release_utc.replace(".000Z", "Z"));
 });
 
 test("weekly projection crosses into the next year", () => {
@@ -151,7 +209,7 @@ test("weekly projection crosses into the next year", () => {
     recent_releases_utc: ["2026-12-20T15:00:00Z", "2026-12-27T15:00:00Z"]
   });
   assert.equal(isoOf(result.at), "2027-01-03T15:00:00Z");
-  assert.equal(result.source, "projected-weekly");
+  assert.equal(result.source, "projected-cadence");
 });
 
 test("break projection crosses into the next year", () => {
@@ -204,16 +262,9 @@ test("projection spans February in a leap year", () => {
 
 test("gaps are measured in real elapsed time, not calendar arithmetic", () => {
   // Every one of these is exactly seven days apart across a year boundary.
-  assert.equal(weeklyRunLength([
-    at("2026-12-20T15:00:00Z"),
-    at("2026-12-27T15:00:00Z"),
-    at("2027-01-03T15:00:00Z")
-  ]), 3);
+  assert.equal(runOf(7, "2026-12-20T15:00:00Z", "2026-12-27T15:00:00Z", "2027-01-03T15:00:00Z"), 3);
   // A month boundary is not a gap: Jan 31 to Feb 7 is still one week.
-  assert.equal(weeklyRunLength([
-    at("2027-01-31T15:00:00Z"),
-    at("2027-02-07T15:00:00Z")
-  ]), 2);
+  assert.equal(runOf(7, "2027-01-31T15:00:00Z", "2027-02-07T15:00:00Z"), 2);
 });
 
 test("the live schedule.json parses and resolves", () => {

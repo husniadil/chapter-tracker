@@ -312,37 +312,56 @@
 "use strict";
 
 /* === projection:begin ===
-   Works out the next release when MANGA Plus has not announced one, using the
-   three-on / one-off rotation anchored on the last known release. Kept free of
+   Works out the next release when MANGA Plus has not announced one. Kept free of
    DOM access so scripts/test_projection.mjs can run this exact source. */
 
 var DAY_MS = 24 * 60 * 60 * 1000;
 var WEEK_MS = 7 * DAY_MS;
 var GAP_TOLERANCE_MS = DAY_MS;
-var WEEKS_ON_BEFORE_BREAK = 3;
+var RUN_BEFORE_BREAK = 3;
 
-/* How many releases in a row, ending at the newest one, were a week apart. */
-function weeklyRunLength(times) {
-  var sorted = times
+function sortedReleases(times) {
+  return times
     .filter(function (t) { return typeof t === "number" && isFinite(t); })
     .filter(function (t, i, a) { return a.indexOf(t) === i; })
     .sort(function (a, b) { return a - b; });
+}
+
+/* The cadence the series is actually keeping. Breaks only ever stretch the gap
+   between releases and never shorten it, so the shortest recent gap is the
+   cadence itself. One Piece has run both weekly and fortnightly, and assuming a
+   week projects a fortnightly run a week early, into a date already past. */
+function releaseCadence(sorted) {
+  var shortest = null;
+  for (var i = 1; i < sorted.length; i++) {
+    var gap = sorted[i] - sorted[i - 1];
+    if (shortest === null || gap < shortest) shortest = gap;
+  }
+  return shortest === null ? WEEK_MS : shortest;
+}
+
+/* How many releases in a row, ending at the newest, kept that cadence. */
+function runLength(sorted, cadence) {
   if (sorted.length === 0) return 0;
   var run = 1;
   for (var i = sorted.length - 1; i > 0; i--) {
-    if (Math.abs(sorted[i] - sorted[i - 1] - WEEK_MS) <= GAP_TOLERANCE_MS) run++;
+    if (Math.abs(sorted[i] - sorted[i - 1] - cadence) <= GAP_TOLERANCE_MS) run++;
     else break;
   }
   return run;
 }
 
-/* Three weeks running means the fourth is the rotation's off week. */
+/* Three weeks running means the fourth is the rotation's off week. That rule is
+   about a weekly series skipping a week; a fortnightly run has no such rotation,
+   so its cadence simply repeats. */
 function projectNextRelease(latestMs, recentMs) {
-  var run = weeklyRunLength((recentMs || []).concat([latestMs]));
-  if (run >= WEEKS_ON_BEFORE_BREAK) {
+  var sorted = sortedReleases((recentMs || []).concat([latestMs]));
+  var cadence = releaseCadence(sorted);
+  var weekly = Math.abs(cadence - WEEK_MS) <= GAP_TOLERANCE_MS;
+  if (weekly && runLength(sorted, cadence) >= RUN_BEFORE_BREAK) {
     return { at: latestMs + 2 * WEEK_MS, source: "projected-break" };
   }
-  return { at: latestMs + WEEK_MS, source: "projected-weekly" };
+  return { at: latestMs + cadence, source: "projected-cadence" };
 }
 
 /* An announced date always wins over the projection. */
@@ -351,7 +370,7 @@ function resolveNextRelease(schedule) {
   if (!isFinite(latest)) return null;
 
   var recent = (schedule.recent_releases_utc || [])
-    .map(Date.parse)
+    .map(function (t) { return Date.parse(t); })
     .filter(function (t) { return isFinite(t); });
 
   var at, source;
@@ -412,12 +431,16 @@ var COPY = {
   errorTitle: "Jadwal tidak tersedia",
   loadFailed: "Jadwalnya gagal dimuat. Coba muat ulang halaman ini.",
   unreadable: "Jadwalnya ada, tapi isinya tidak terbaca.",
+  estimateLapsed: "Perkiraan tanggalnya sudah lewat.",
+  estimateLapsedDetail: "MANGA Plus belum mengumumkan jadwal barunya.",
   airingFailed: "Jadwal tayang tidak bisa dimuat sekarang."
 };
 
 function el(id) { return document.getElementById(id); }
 function pad(n) { return n < 10 ? "0" + n : String(n); }
-function stamp(ms) { return fullWib.format(new Date(ms)) + " WIB"; }
+/* Null rather than a throw: a schedule missing one timestamp should cost that
+   one line, not blow the render up into a false "could not load". */
+function stamp(ms) { return isFinite(ms) ? fullWib.format(new Date(ms)) + " WIB" : null; }
 
 /* Short dates carry no year, which is only safe while the date is in the year
    the reader is living in. An episode four weeks out in December is not. */
@@ -429,6 +452,7 @@ function shortDay(ms) {
 }
 
 var target = null;
+var targetConfirmed = false;
 var released = false;
 
 function tick() {
@@ -436,7 +460,7 @@ function tick() {
   var left = target - Date.now();
   if (left <= 0 && !released) {
     released = true;
-    render.released();
+    render.passed();
   }
   // Ceil, not floor: with floor the display hits zero while `left` is still
   // positive, so the page sat on 00:00:00:00 until the next tick released it.
@@ -448,21 +472,34 @@ function tick() {
 }
 
 var render = {
-  released: function () {
+  /* The target has passed. Whether that means a chapter shipped depends on
+     where the target came from: an announced date is a fact, a projection is
+     still a guess, and a guess that ran out must not be reported as a release. */
+  passed: function () {
     el("page").classList.add("is-released");
     el("timer").hidden = true;
     el("progress").hidden = true;
-    el("caveat").hidden = true;
     el("break").hidden = true;
-    el("tag").hidden = true;
-    el("when").textContent = target ? "Sudah terbit " + stamp(target) + "." : "Sudah terbit.";
+
+    if (targetConfirmed) {
+      el("caveat").hidden = true;
+      el("tag").hidden = true;
+      var at = stamp(target);
+      el("when").textContent = at ? "Sudah terbit " + at + "." : "Sudah terbit.";
+      return;
+    }
+    el("when").textContent = COPY.estimateLapsed;
+    el("caveat").textContent = COPY.estimateLapsedDetail;
+    el("caveat").hidden = false;
   }
 };
 
-function renderSchedule(schedule) {
+/* Every render starts from the same blank state. Without this a failed refetch
+   left the previous render's badge, break banner and footer standing beside an
+   error message. */
+function resetChrome() {
   var page = el("page");
   page.classList.remove("is-loading");
-
   page.classList.remove("is-released");
   el("alert").hidden = true;
   el("alert-detail").hidden = true;
@@ -470,13 +507,29 @@ function renderSchedule(schedule) {
   el("caveat").hidden = true;
   el("tag").hidden = true;
   el("progress").hidden = true;
+  el("timer").hidden = true;
   released = false;
+}
+
+function showFailure(message) {
+  resetChrome();
+  el("headline").textContent = COPY.errorTitle;
+  el("when").textContent = message;
+  el("updated").textContent = "";
+  document.title = "Chapter Tracker";
+  target = null;
+  targetConfirmed = false;
+}
+
+function renderSchedule(schedule) {
+  resetChrome();
 
   if (schedule.stale) {
     el("alert-title").textContent = COPY.staleTitle;
+    var lastGood = stamp(Date.parse(schedule.updated_at_utc));
     el("alert-body").textContent =
       (COPY.reasons[schedule.stale_reason_code] || COPY.reasons.unknown) +
-      COPY.kept + stamp(Date.parse(schedule.updated_at_utc)) + ".";
+      (lastGood ? COPY.kept + lastGood + "." : "");
     if (schedule.stale_reason) {
       el("alert-detail-label").textContent = COPY.diagnosticLabel;
       el("alert-diagnostic").textContent = schedule.stale_reason;
@@ -487,9 +540,7 @@ function renderSchedule(schedule) {
 
   var next = resolveNextRelease(schedule);
   if (!next) {
-    el("headline").textContent = COPY.errorTitle;
-    el("when").textContent = COPY.unreadable;
-    el("timer").hidden = true;
+    showFailure(COPY.unreadable);
     return;
   }
 
@@ -518,11 +569,12 @@ function renderSchedule(schedule) {
   }
 
   target = next.at;
+  targetConfirmed = next.confirmed;
   el("timer").hidden = false;
 
   if (now >= target) {
     released = true;
-    render.released();
+    render.passed();
   } else {
     var span = next.at - latest;
     if (span > 0) {
@@ -535,7 +587,8 @@ function renderSchedule(schedule) {
     tick();
   }
 
-  el("updated").textContent = "Terakhir diperbarui " + stamp(Date.parse(schedule.updated_at_utc)) + ".";
+  var updatedAt = stamp(Date.parse(schedule.updated_at_utc));
+  el("updated").textContent = updatedAt ? "Terakhir diperbarui " + updatedAt + "." : "";
 }
 
 function renderEpisodes(nodes) {
@@ -602,12 +655,8 @@ function loadSchedule() {
       return response.json();
     })
     .then(renderSchedule)
-    .catch(function (error) {
-      el("page").classList.remove("is-loading");
-      el("headline").textContent = COPY.errorTitle;
-      el("when").textContent = COPY.loadFailed;
-      el("timer").hidden = true;
-      target = null;
+    .catch(function () {
+      showFailure(COPY.loadFailed);
     });
 }
 
