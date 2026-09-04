@@ -77,11 +77,41 @@
     color: var(--accent);
   }
   .alert p { margin: 5px 0 0; font-size: 14px; color: var(--muted); }
+
+  /* The raw message from the update job. Useless to a reader, and the first
+     thing worth seeing when the site itself is what broke, so it stays on the
+     page one tap away instead of in the notice. */
+  /* The negative margin cancels the padding that gives this a thumb-sized tap
+     target, so the notice does not grow to pay for it. */
+  .alert details { margin-top: -3px; }
+  .alert summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 44px;
+    padding-right: 16px;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    list-style: none;
+  }
+  .alert summary::-webkit-details-marker { display: none; }
+  .alert summary::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-right: 1px solid currentColor;
+    border-bottom: 1px solid currentColor;
+    transform: rotate(-45deg);
+  }
+  .alert details[open] summary::before { transform: rotate(45deg); }
+  .alert summary:hover { color: var(--fg); }
   .alert .diagnostic {
-    margin-top: 8px;
+    margin-top: -4px;
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     font-size: 12px;
     line-height: 1.45;
+    color: var(--muted);
     word-break: break-word;
   }
 
@@ -168,6 +198,8 @@
     /* Motivated: the bar slides to its real position so the fill reads as
        elapsed time rather than as a static graphic. */
     .progress span { transition: width 600ms cubic-bezier(0.16, 1, 0.3, 1); }
+    /* Direct feedback on a control the reader just clicked. */
+    .alert summary::before { transition: transform 150ms ease; }
   }
 
   /* Airing schedule. Deliberately a different layout family from the release
@@ -236,7 +268,10 @@
   <div class="alert" id="alert" hidden>
     <h2 id="alert-title"></h2>
     <p id="alert-body"></p>
-    <p class="diagnostic" id="alert-diagnostic" hidden></p>
+    <details id="alert-detail" hidden>
+      <summary id="alert-detail-label"></summary>
+      <p class="diagnostic" id="alert-diagnostic"></p>
+    </details>
   </div>
 
   <section class="release">
@@ -356,6 +391,29 @@ var clockWib = new Intl.DateTimeFormat("id-ID", {
   timeZone: WIB, hour: "2-digit", minute: "2-digit"
 });
 
+/* The update job classifies its own failures; the page turns a class into a
+   sentence. The job's raw message is a diagnostic, so it lives in the
+   disclosure rather than in the notice. An unrecognised class falls back,
+   which keeps an older page working against a newer schedule file. */
+var COPY = {
+  staleTitle: "Jadwal belum diperbarui",
+  diagnosticLabel: "Detail teknis",
+  reasons: {
+    source_unreachable: "MANGA Plus tidak bisa dihubungi saat pengecekan terakhir.",
+    source_refused: "MANGA Plus bisa dihubungi, tapi menolak memberikan jadwalnya.",
+    format_changed: "Susunan daftar chapter di MANGA Plus berubah, jadi jadwal baru belum terbaca.",
+    data_rejected: "Jadwal baru dari MANGA Plus terbaca, tapi angkanya janggal, jadi tidak dipakai.",
+    unknown: "Pembaruan terakhir gagal, sebabnya belum diketahui."
+  },
+  // "yang berhasil" matters under a heading that says no update happened:
+  // without it the timestamp reads as the attempt that just failed.
+  kept: " Jadwal di bawah masih dari pembaruan terakhir yang berhasil pada ",
+  errorTitle: "Jadwal tidak tersedia",
+  loadFailed: "Jadwalnya gagal dimuat. Coba muat ulang halaman ini.",
+  unreadable: "Jadwalnya ada, tapi isinya tidak terbaca.",
+  airingFailed: "Jadwal tayang tidak bisa dimuat sekarang."
+};
+
 function el(id) { return document.getElementById(id); }
 function pad(n) { return n < 10 ? "0" + n : String(n); }
 function stamp(ms) { return fullWib.format(new Date(ms)) + " WIB"; }
@@ -396,7 +454,7 @@ function renderSchedule(schedule) {
 
   page.classList.remove("is-released");
   el("alert").hidden = true;
-  el("alert-diagnostic").hidden = true;
+  el("alert-detail").hidden = true;
   el("break").hidden = true;
   el("caveat").hidden = true;
   el("tag").hidden = true;
@@ -404,21 +462,22 @@ function renderSchedule(schedule) {
   released = false;
 
   if (schedule.stale) {
-    el("alert-title").textContent = "Data belum diperbarui";
+    el("alert-title").textContent = COPY.staleTitle;
     el("alert-body").textContent =
-      "Pembaruan terakhir yang berhasil " + stamp(Date.parse(schedule.updated_at_utc)) +
-      ". Jadwal di bawah ini masih dari saat itu.";
+      (COPY.reasons[schedule.stale_reason_code] || COPY.reasons.unknown) +
+      COPY.kept + stamp(Date.parse(schedule.updated_at_utc)) + ".";
     if (schedule.stale_reason) {
+      el("alert-detail-label").textContent = COPY.diagnosticLabel;
       el("alert-diagnostic").textContent = schedule.stale_reason;
-      el("alert-diagnostic").hidden = false;
+      el("alert-detail").hidden = false;
     }
     el("alert").hidden = false;
   }
 
   var next = resolveNextRelease(schedule);
   if (!next) {
-    el("headline").textContent = "Jadwal tidak terbaca";
-    el("when").textContent = "Isi schedule.json tidak sesuai format yang diharapkan.";
+    el("headline").textContent = COPY.errorTitle;
+    el("when").textContent = COPY.unreadable;
     el("timer").hidden = true;
     return;
   }
@@ -520,7 +579,7 @@ function loadEpisodes() {
     })
     .catch(function () {
       el("episodes").hidden = true;
-      el("airing-status").textContent = "Jadwal tayang tidak bisa dimuat sekarang.";
+      el("airing-status").textContent = COPY.airingFailed;
       el("airing-status").hidden = false;
     });
 }
@@ -534,8 +593,8 @@ function loadSchedule() {
     .then(renderSchedule)
     .catch(function (error) {
       el("page").classList.remove("is-loading");
-      el("headline").textContent = "Jadwal tidak bisa dimuat";
-      el("when").textContent = "Gagal membaca schedule.json (" + error.message + ").";
+      el("headline").textContent = COPY.errorTitle;
+      el("when").textContent = COPY.loadFailed;
       el("timer").hidden = true;
       target = null;
     });

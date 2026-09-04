@@ -65,8 +65,20 @@ _override = os.environ.get("MANGAPLUS_CHAPTER_GROUP_FIELD", "").strip()
 CHAPTER_GROUP_FIELD = int(_override) if _override else F_CHAPTER_GROUP
 
 
+# What went wrong, in terms the page can turn into a sentence for the reader.
+# The raw message stays alongside it for whoever maintains the job.
+SOURCE_UNREACHABLE = "source_unreachable"  # no answer: network, timeout, non-200
+SOURCE_REFUSED = "source_refused"          # answered, and declined to serve the data
+FORMAT_CHANGED = "format_changed"          # answered, in a shape we no longer recognise
+DATA_REJECTED = "data_rejected"            # read cleanly, but the values failed a sanity check
+
+
 class ParseError(Exception):
     """The response did not look like the title page data we know how to read."""
+
+    def __init__(self, message: str, code: str = FORMAT_CHANGED):
+        super().__init__(message)
+        self.code = code
 
 
 # --- minimal protobuf wire reader -------------------------------------------
@@ -154,7 +166,7 @@ def fetch(url: str) -> bytes:
     )
     with urllib.request.urlopen(request, timeout=30) as response:
         if response.status != 200:
-            raise ParseError(f"HTTP {response.status} from MANGA Plus")
+            raise ParseError(f"HTTP {response.status} from MANGA Plus", SOURCE_UNREACHABLE)
         return response.read()
 
 
@@ -200,13 +212,15 @@ def scrape() -> dict:
     try:
         body = fetch(API_URL)
     except urllib.error.URLError as exc:
-        raise ParseError(f"request failed: {exc}") from exc
+        raise ParseError(f"request failed: {exc}", SOURCE_UNREACHABLE) from exc
 
     root = parse_message(body)
     if F_SUCCESS not in root:
         if F_ERROR in root:
             raw = root[F_ERROR][0]
-            raise ParseError(f"MANGA Plus refused: {readable_error(parse_message(raw))}")
+            raise ParseError(
+                f"MANGA Plus refused: {readable_error(parse_message(raw))}", SOURCE_REFUSED
+            )
         raise ParseError("response has neither a success nor an error result")
 
     success = parse_message(root[F_SUCCESS][0])
@@ -231,15 +245,22 @@ def scrape() -> dict:
 
     age_days = (now - latest_release) / DAY
     if age_days > MAX_RELEASE_AGE_DAYS:
-        raise ParseError(f"latest chapter #{latest_chapter} is {age_days:.0f} days old")
+        raise ParseError(
+            f"latest chapter #{latest_chapter} is {age_days:.0f} days old", DATA_REJECTED
+        )
 
     next_raw = detail.get(F_NEXT_TIMESTAMP, [0])[0]
     next_release = next_raw if isinstance(next_raw, int) else 0
     if next_release:
         if next_release <= latest_release:
-            raise ParseError("announced next release is not after the latest release")
+            raise ParseError(
+                "announced next release is not after the latest release", DATA_REJECTED
+            )
         if (next_release - now) / DAY > MAX_NEXT_HORIZON_DAYS:
-            raise ParseError(f"announced next release is {(next_release - now) / DAY:.0f} days out")
+            raise ParseError(
+                f"announced next release is {(next_release - now) / DAY:.0f} days out",
+                DATA_REJECTED,
+            )
 
     # Keep the recent release timestamps so the page can work out where we are in
     # the three-on / one-off rotation when MANGA Plus has not announced a date.
@@ -299,7 +320,8 @@ def main() -> int:
         scraped = scrape()
     except (ParseError, OSError) as exc:
         reason = str(exc)
-        print(f"update failed: {reason}", file=sys.stderr)
+        code = exc.code if isinstance(exc, ParseError) else SOURCE_UNREACHABLE
+        print(f"update failed [{code}]: {reason}", file=sys.stderr)
         if previous is None:
             print("no previous schedule.json to preserve", file=sys.stderr)
             return 1
@@ -307,6 +329,7 @@ def main() -> int:
         # of the data, which is exactly what the stale notice needs to show.
         stale = dict(previous)
         stale["stale"] = True
+        stale["stale_reason_code"] = code
         stale["stale_reason"] = reason
         stale["stale_since_utc"] = previous.get("stale_since_utc") or now_iso
         if content_of(stale) != content_of(previous):
