@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Chapter Tracker</title>
+<meta name="color-scheme" content="dark light">
+<meta name="description" content="Jadwal rilis chapter dan episode One Piece dalam WIB.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111316'/%3E%3Crect x='9' y='8' width='14' height='16' rx='2' fill='none' stroke='%23e2703a' stroke-width='2'/%3E%3Cpath d='M13 13h6M13 17h6' stroke='%23e2703a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #101114;
+    --panel: #17191d;
+    --line: #24272d;
+    --text: #e8e9ec;
+    --muted: #8a8f99;
+    --accent: #e2703a;
+    --warn-bg: #2a1d16;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f7f7f5;
+      --panel: #ffffff;
+      --line: #e4e4e0;
+      --text: #1b1c1f;
+      --muted: #6b7079;
+      --warn-bg: #fdf1e9;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 400 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 28px 20px 40px;
+    display: flex;
+    justify-content: center;
+  }
+  main { width: 100%; max-width: 560px; }
+
+  header { margin-bottom: 26px; }
+  h1 {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin: 0;
+  }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+
+  section {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  h2 {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 14px;
+  }
+
+  .chapter {
+    font-size: 30px;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    margin: 0;
+  }
+  .chapter .accent { color: var(--accent); }
+
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    vertical-align: middle;
+    margin-left: 10px;
+  }
+  .badge.is-confirmed { color: var(--accent); border-color: var(--accent); }
+
+  .when { margin: 10px 0 0; color: var(--muted); font-size: 14px; }
+  .note { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+
+  .countdown {
+    display: flex;
+    gap: 6px;
+    margin-top: 20px;
+    font-variant-numeric: tabular-nums;
+  }
+  .unit { flex: 1 1 0; text-align: center; }
+  .unit b {
+    display: block;
+    font-size: clamp(30px, 11vw, 46px);
+    font-weight: 650;
+    letter-spacing: -0.03em;
+    line-height: 1.05;
+  }
+  .unit span {
+    display: block;
+    margin-top: 4px;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .banner {
+    border: 1px solid var(--accent);
+    background: var(--warn-bg);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+  }
+  .banner strong { display: block; font-size: 15px; }
+  .banner p { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+
+  ul { list-style: none; margin: 0; padding: 0; }
+  li {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    padding: 9px 0;
+    border-top: 1px solid var(--line);
+    font-size: 14px;
+  }
+  li:first-child { border-top: 0; padding-top: 0; }
+  li b { font-weight: 600; white-space: nowrap; }
+  li span { color: var(--muted); text-align: right; }
+
+  footer {
+    margin-top: 22px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.7;
+  }
+  footer a { color: var(--muted); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Chapter Tracker</h1>
+    <p>Jadwal One Piece dalam waktu Indonesia Barat.</p>
+  </header>
+
+  <div class="banner" id="stale" hidden>
+    <strong>Data mungkin sudah basi</strong>
+    <p id="stale-detail"></p>
+  </div>
+
+  <div class="banner" id="break" hidden>
+    <strong>Minggu ini libur</strong>
+    <p id="break-detail"></p>
+  </div>
+
+  <section id="manga">
+    <h2>Manga</h2>
+    <p class="chapter" id="manga-headline">Memuat&hellip;</p>
+    <p class="when" id="manga-when"></p>
+    <p class="note" id="manga-note" hidden></p>
+    <div class="countdown" id="countdown" hidden>
+      <div class="unit"><b id="cd-d">0</b><span>hari</span></div>
+      <div class="unit"><b id="cd-h">0</b><span>jam</span></div>
+      <div class="unit"><b id="cd-m">0</b><span>menit</span></div>
+      <div class="unit"><b id="cd-s">0</b><span>detik</span></div>
+    </div>
+  </section>
+
+  <section id="anime">
+    <h2>Anime</h2>
+    <p class="note" id="anime-status">Memuat&hellip;</p>
+    <ul id="anime-list"></ul>
+  </section>
+
+  <footer>
+    <p id="updated">&nbsp;</p>
+    <p id="source"></p>
+  </footer>
+</main>
+
+<script>
+"use strict";
+
+/* === projection:begin ===
+   Works out the next release when MANGA Plus has not announced one, using the
+   three-on / one-off rotation anchored on the last known release. Kept free of
+   DOM access so scripts/test_projection.mjs can run this exact source. */
+
+var DAY_MS = 24 * 60 * 60 * 1000;
+var WEEK_MS = 7 * DAY_MS;
+var GAP_TOLERANCE_MS = DAY_MS;
+var WEEKS_ON_BEFORE_BREAK = 3;
+
+/* How many releases in a row, ending at the newest one, were a week apart. */
+function weeklyRunLength(times) {
+  var sorted = times
+    .filter(function (t) { return typeof t === "number" && isFinite(t); })
+    .filter(function (t, i, a) { return a.indexOf(t) === i; })
+    .sort(function (a, b) { return a - b; });
+  if (sorted.length === 0) return 0;
+  var run = 1;
+  for (var i = sorted.length - 1; i > 0; i--) {
+    if (Math.abs(sorted[i] - sorted[i - 1] - WEEK_MS) <= GAP_TOLERANCE_MS) run++;
+    else break;
+  }
+  return run;
+}
+
+/* Three weeks running means the fourth is the rotation's off week. */
+function projectNextRelease(latestMs, recentMs) {
+  var run = weeklyRunLength((recentMs || []).concat([latestMs]));
+  if (run >= WEEKS_ON_BEFORE_BREAK) {
+    return { at: latestMs + 2 * WEEK_MS, source: "projected-break" };
+  }
+  return { at: latestMs + WEEK_MS, source: "projected-weekly" };
+}
+
+/* An announced date always wins over the projection. */
+function resolveNextRelease(schedule) {
+  var latest = Date.parse(schedule.latest_release_utc);
+  if (!isFinite(latest)) return null;
+
+  var recent = (schedule.recent_releases_utc || [])
+    .map(Date.parse)
+    .filter(function (t) { return isFinite(t); });
+
+  var at, source;
+  var announced = schedule.next_confirmed ? Date.parse(schedule.next_release_utc) : NaN;
+  if (isFinite(announced)) {
+    at = announced;
+    source = "confirmed";
+  } else {
+    var projection = projectNextRelease(latest, recent);
+    at = projection.at;
+    source = projection.source;
+  }
+
+  var gapDays = (at - latest) / DAY_MS;
+  return {
+    at: at,
+    source: source,
+    confirmed: source === "confirmed",
+    gapDays: gapDays,
+    breakWeek: gapDays > 7 + GAP_TOLERANCE_MS / DAY_MS
+  };
+}
+/* === projection:end === */
+
+var WIB = "Asia/Jakarta";
+var dateTimeWib = new Intl.DateTimeFormat("id-ID", {
+  timeZone: WIB, weekday: "long", day: "numeric", month: "long",
+  year: "numeric", hour: "2-digit", minute: "2-digit"
+});
+var dateWib = new Intl.DateTimeFormat("id-ID", {
+  timeZone: WIB, weekday: "long", day: "numeric", month: "long"
+});
+var shortWib = new Intl.DateTimeFormat("id-ID", {
+  timeZone: WIB, day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"
+});
+
+function el(id) { return document.getElementById(id); }
+function wib(ms) { return dateTimeWib.format(new Date(ms)) + " WIB"; }
+function wibDay(ms) { return dateWib.format(new Date(ms)); }
+function wibShort(ms) { return shortWib.format(new Date(ms)) + " WIB"; }
+
+var countdownTarget = null;
+
+function tick() {
+  if (countdownTarget === null) return;
+  var left = Math.max(0, countdownTarget - Date.now());
+  var s = Math.floor(left / 1000);
+  el("cd-d").textContent = Math.floor(s / 86400);
+  el("cd-h").textContent = Math.floor(s / 3600) % 24;
+  el("cd-m").textContent = Math.floor(s / 60) % 60;
+  el("cd-s").textContent = s % 60;
+}
+
+function renderManga(schedule) {
+  if (schedule.stale) {
+    el("stale-detail").textContent =
+      "Pembaruan terakhir berhasil " + wib(Date.parse(schedule.updated_at_utc)) +
+      ". Pengambilan data terbaru gagal: " + (schedule.stale_reason || "alasan tidak dicatat") + ".";
+    el("stale").hidden = false;
+  }
+
+  var next = resolveNextRelease(schedule);
+  if (!next) {
+    el("manga-headline").textContent = "Jadwal manga tidak terbaca";
+    return;
+  }
+
+  el("manga-headline").innerHTML =
+    "Chapter <span class=\"accent\">" + schedule.next_chapter + "</span>" +
+    "<span class=\"badge" + (next.confirmed ? " is-confirmed" : "") + "\">" +
+    (next.confirmed ? "Terkonfirmasi" : "Perkiraan") + "</span>";
+  el("manga-when").textContent = wib(next.at);
+
+  if (!next.confirmed) {
+    el("manga-note").textContent =
+      "MANGA Plus belum mengumumkan tanggalnya. Ini perkiraan dari pola tiga minggu " +
+      "terbit satu minggu libur, dihitung dari chapter " + schedule.latest_chapter + ".";
+    el("manga-note").hidden = false;
+  }
+
+  // A break is worth announcing only while it still costs the reader a week.
+  // Once the skipped Sunday has passed, the countdown says everything.
+  if (next.breakWeek && next.at - Date.now() > WEEK_MS) {
+    el("break-detail").textContent =
+      "Chapter " + schedule.next_chapter + " baru terbit " + wibDay(next.at) +
+      ". Chapter " + schedule.latest_chapter + " terbit " +
+      wibDay(Date.parse(schedule.latest_release_utc)) + ".";
+    el("break").hidden = false;
+  }
+
+  countdownTarget = next.at;
+  el("countdown").hidden = false;
+  tick();
+
+  el("updated").textContent = "Terakhir diperbarui " + wib(Date.parse(schedule.updated_at_utc)) + ".";
+  if (schedule.source_url) {
+    el("source").innerHTML =
+      "Sumber manga: <a href=\"" + schedule.source_url + "\" rel=\"noreferrer\">MANGA Plus</a>. " +
+      "Sumber anime: AniList.";
+  }
+}
+
+function renderAnime(nodes) {
+  var list = el("anime-list");
+  nodes.forEach(function (node) {
+    var li = document.createElement("li");
+    var name = document.createElement("b");
+    name.textContent = "Episode " + node.episode;
+    var when = document.createElement("span");
+    when.textContent = wibShort(node.airingAt * 1000);
+    li.appendChild(name);
+    li.appendChild(when);
+    list.appendChild(li);
+  });
+  el("anime-status").hidden = true;
+}
+
+var ANILIST_QUERY =
+  "query($id:Int){Media(id:$id,type:ANIME){airingSchedule(notYetAired:true,perPage:4){nodes{episode airingAt}}}}";
+
+function loadAnime() {
+  return fetch("https://graphql.anilist.co", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ query: ANILIST_QUERY, variables: { id: 21 } })
+  })
+    .then(function (response) {
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      return response.json();
+    })
+    .then(function (payload) {
+      var media = payload && payload.data && payload.data.Media;
+      var nodes = media && media.airingSchedule ? media.airingSchedule.nodes : null;
+      if (!nodes || nodes.length === 0) throw new Error("jadwal kosong");
+      renderAnime(nodes);
+    })
+    .catch(function (error) {
+      el("anime-status").textContent = "Jadwal anime gagal dimuat (" + error.message + ").";
+    });
+}
+
+function loadManga() {
+  return fetch("./schedule.json", { cache: "no-store" })
+    .then(function (response) {
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      return response.json();
+    })
+    .then(renderManga)
+    .catch(function (error) {
+      el("manga-headline").textContent = "Jadwal manga gagal dimuat";
+      el("manga-when").textContent = error.message;
+    });
+}
+
+loadManga();
+loadAnime();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>

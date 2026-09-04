@@ -1,0 +1,63 @@
+name: schedule
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      chapter_group_field:
+        description: >-
+          Override the protobuf field the chapter list is read from. Leave empty
+          for normal runs; set it to a field that is not in the response (e.g. 99)
+          to rehearse the parse-failure path.
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: schedule
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test the release projection
+        run: node scripts/test_projection.mjs
+
+      - name: Update schedule.json
+        id: update
+        continue-on-error: true
+        env:
+          MANGAPLUS_CHAPTER_GROUP_FIELD: ${{ inputs.chapter_group_field }}
+        run: python3 scripts/update_schedule.py
+
+      # Runs even when the update failed, so the stale flag reaches the page.
+      - name: Commit when the schedule changed
+        run: |
+          if git diff --quiet -- docs/schedule.json; then
+            echo "docs/schedule.json unchanged, nothing to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "${{ steps.update.outcome }}" = "success" ]; then
+            latest=$(python3 -c "import json;print(json.load(open('docs/schedule.json'))['latest_chapter'])")
+            next=$(python3 -c "import json;print(json.load(open('docs/schedule.json'))['next_chapter'])")
+            message="schedule: $latest -> $next"
+          else
+            message="schedule: mark stale"
+          fi
+          git add docs/schedule.json
+          git commit -m "$message"
+          git push
+
+      - name: Fail if the update failed
+        if: steps.update.outcome == 'failure'
+        run: |
+          echo "::error::Reading MANGA Plus failed; docs/schedule.json is marked stale."
+          exit 1
