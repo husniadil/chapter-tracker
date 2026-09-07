@@ -26,9 +26,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Test the release projection
-        run: node scripts/test_projection.mjs
-
       - name: Update schedule.json
         id: update
         continue-on-error: true
@@ -56,8 +53,14 @@ jobs:
           git commit -m "$message"
           git push
 
+      # After the update, so a failing test never stops the schedule refreshing.
+      # The projection lives in the page, not in the scraper.
+      - name: Test the release projection
+        if: always()
+        run: node scripts/test_projection.mjs
+
       - name: Fail if the update failed
-        if: steps.update.outcome == 'failure'
+        if: always() && steps.update.outcome == 'failure'
         run: |
           echo "::error::Reading MANGA Plus failed; docs/schedule.json is marked stale."
           exit 1

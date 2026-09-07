@@ -190,14 +190,63 @@ test("the break rule stays off a fortnightly run", () => {
   assert.equal(result.gapDays, 14, "a 28-day projection would mean the break rule fired");
 });
 
-test("the projection agrees with the date MANGA Plus announced", () => {
-  // The strongest check available: hide the announced date, project it back,
-  // and require the guess to land on it.
-  const live = JSON.parse(readFileSync(join(root, "docs", "schedule.json"), "utf8"));
-  if (!live.next_confirmed || !live.next_release_utc) return;
-  const blind = resolveNextRelease({ ...live, next_confirmed: false, next_release_utc: null });
-  assert.equal(isoOf(blind.at), live.next_release_utc.replace(".000Z", "Z"));
+test("a cadence change is only visible once a release lands on the new cadence", () => {
+  // A fortnightly run that goes back to weekly: the announced date is a week
+  // out, every gap on record is still a fortnight. No history-based projection
+  // can see that coming, so the page must fall back to the announced date and,
+  // when there is none, overshoot rather than invent a date.
+  const history = [
+    "2026-07-26T15:00:00Z",
+    "2026-08-09T15:00:00Z",
+    "2026-08-23T15:00:00Z",
+    "2026-09-06T15:00:00Z"
+  ];
+  const announced = resolveNextRelease({
+    latest_release_utc: "2026-09-06T15:00:00Z",
+    next_release_utc: "2026-09-13T15:00:00Z",
+    next_confirmed: true,
+    recent_releases_utc: history
+  });
+  assert.equal(isoOf(announced.at), "2026-09-13T15:00:00Z");
+  assert.equal(announced.source, "confirmed");
+
+  const blind = resolveNextRelease({
+    latest_release_utc: "2026-09-06T15:00:00Z",
+    next_release_utc: null,
+    next_confirmed: false,
+    recent_releases_utc: history
+  });
+  assert.equal(isoOf(blind.at), "2026-09-20T15:00:00Z", "the projection can only repeat the cadence it has seen");
+
+  // Once the weekly release is on record the cadence corrects itself.
+  const corrected = resolveNextRelease({
+    latest_release_utc: "2026-09-13T15:00:00Z",
+    next_release_utc: null,
+    next_confirmed: false,
+    recent_releases_utc: history.concat(["2026-09-13T15:00:00Z"])
+  });
+  assert.equal(isoOf(corrected.at), "2026-09-20T15:00:00Z");
+  assert.equal(corrected.gapDays, 7);
 });
+
+/* Not a test: the live file records what the series is doing, and the series is
+   free to change cadence. Reported so a divergence is visible in the run log
+   without turning a real-world schedule change into a red build. */
+function reportLiveAgreement() {
+  const live = JSON.parse(readFileSync(join(root, "docs", "schedule.json"), "utf8"));
+  if (!live.next_confirmed || !live.next_release_utc) {
+    console.log("note nothing announced to compare the projection against");
+    return;
+  }
+  const blind = resolveNextRelease({ ...live, next_confirmed: false, next_release_utc: null });
+  const announced = live.next_release_utc.replace(".000Z", "Z");
+  const guess = isoOf(blind.at);
+  console.log(
+    guess === announced
+      ? `note the projection agrees with the announced ${announced}`
+      : `note the projection says ${guess}, MANGA Plus announced ${announced}; the announced date is what the page shows`
+  );
+}
 
 test("weekly projection crosses into the next year", () => {
   const result = resolveNextRelease({
@@ -273,6 +322,8 @@ test("the live schedule.json parses and resolves", () => {
   assert.ok(result, "live schedule.json did not resolve");
   assert.ok(isFinite(result.at), "resolved release time is not a number");
 });
+
+reportLiveAgreement();
 
 console.log(failures === 0 ? "\nall tests passed" : `\n${failures} test(s) failed`);
 process.exit(failures === 0 ? 0 : 1);
